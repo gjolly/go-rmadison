@@ -133,7 +133,7 @@ func ParseReleaseFile(raw []byte) (*ReleaseFile, error) {
 			field.SetString(keyValue[1])
 		}
 
-		if strings.HasPrefix(line, "MD5Sum") {
+		if strings.HasPrefix(line, "SHA256") {
 			releaseFile.Sha256 = make(map[string]ReleaseFileEntry, 0)
 			iLine++
 			for iLine < len(lines) {
