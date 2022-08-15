@@ -159,11 +159,11 @@ g0jNCqaLwI5FUfkW+Q4c
 	if releaseFile.Version != "18.04" {
 		t.Errorf("wrong version, expected %v, got %v", "18.04", releaseFile.Version)
 	}
-	if len(releaseFile.Sha256) != 28 {
-		t.Errorf("expected %v Sha256Sum, got %v", 28, len(releaseFile.Sha256))
+	if len(releaseFile.PackageIndex) != 28 {
+		t.Errorf("expected %v Sha256Sum, got %v", 28, len(releaseFile.PackageIndex))
 	}
-	if releaseFile.Sha256["main/binary-i386/Release"].Hash != "ef8ee78d6a8f11dc7d120ee4b3fedf84" {
-		t.Errorf("wrong sha sum expected %v, got %v", "ef8ee78d6a8f11dc7d120ee4b3fedf84", releaseFile.Sha256["main/binary-i386/Release"].Hash)
+	if releaseFile.PackageIndex["main/binary-i386/Release"].Hash != "ef8ee78d6a8f11dc7d120ee4b3fedf84" {
+		t.Errorf("wrong sha sum expected %v, got %v", "ef8ee78d6a8f11dc7d120ee4b3fedf84", releaseFile.PackageIndex["main/binary-i386/Release"].Hash)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestUpdateReleaseInfo(t *testing.T) {
 		Pockets:  []string{"bionic", "bionic-updates"},
 		CacheDir: dir,
 	}
-	nbFile1, err := a.RefreshCache()
+	nbFile1, _, err := a.RefreshCache(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestUpdateReleaseInfo(t *testing.T) {
 		t.Errorf("To few files downloaded (%v)", nbFile1)
 	}
 
-	nbFile2, err := a.RefreshCache()
+	nbFile2, _, err := a.RefreshCache(false)
 	if nbFile2 != 0 {
 		t.Errorf("To many files downloaded on refresh (%v)", nbFile2)
 	}

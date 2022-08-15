@@ -2,9 +2,10 @@ package debian
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/ioutil"
-	"log"
 	"net/url"
 	"os"
 	"path"
@@ -17,7 +18,16 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
+
+var log *zap.SugaredLogger
+
+func init() {
+	// Logger for the operations
+	logger, _ := zap.NewDevelopment()
+	log = logger.Sugar()
+}
 
 // ReleaseFileEntry is a entry in a release file
 type ReleaseFileEntry struct {
@@ -37,7 +47,8 @@ type ReleaseFile struct {
 	Architectures []string
 	Components    []string
 	Description   string
-	Sha256        map[string]ReleaseFileEntry
+	PackageIndex  map[string]ReleaseFileEntry
+	Hash          string
 }
 
 // Archive is a debian archive
@@ -51,34 +62,54 @@ type Archive struct {
 	Packages    map[string]map[string]*PackageInfo
 }
 
-// DownloadReleaseFile downloads a release file for the
-// given pocket
-func (a *Archive) downloadReleaseFile(pocket string) ([]byte, error) {
+func (a *Archive) getReleaseFileLocationsForPocket(pocket string) (url.URL, string) {
 	fileURL := url.URL(a.BaseURL)
 	fileURL.Path = path.Join(fileURL.Path, pocket, "InRelease")
+	outputFileName := strings.ReplaceAll(fileURL.Hostname()+fileURL.Path, "/", "_")
 
-	resp, err := a.Client.R().
-		Get(fileURL.String())
-	if err != nil {
-		return nil, err
-	}
+	outputFilePath := path.Join(a.CacheDir, outputFileName)
 
-	if resp.IsError() {
-		return nil, errors.Wrapf(err, "failed to fetch Release file from %v (%v)", fileURL, resp.Status())
-	}
-
-	return resp.Body(), nil
+	return fileURL, outputFilePath
 }
 
 // GetReleaseInfo downloads all the release files for the pockets and parses them
-func (a *Archive) GetReleaseInfo() (map[string]*ReleaseFile, error) {
+func (a *Archive) GetReleaseInfo(local bool) (map[string]*ReleaseFile, error) {
 	releaseInfo := make(map[string]*ReleaseFile)
 	for _, pocket := range a.Pockets {
-		releaseFile, err := a.downloadReleaseFile(pocket)
-		if err != nil {
-			return nil, err
+		fileURL, outputFilePath := a.getReleaseFileLocationsForPocket(pocket)
+
+		file, err := os.Open(outputFilePath)
+		if err != nil || !local {
+			log.Debugf("[release] fetching %v", outputFilePath)
+			err := downloadFile(a.Client, fileURL, outputFilePath)
+			if err != nil {
+				return nil, err
+			}
+
+			file, err = os.Open(outputFilePath)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			log.Debugf("[release] local %v", outputFilePath)
 		}
-		releaseInfo[pocket], err = ParseReleaseFile(releaseFile)
+		defer file.Close()
+
+		shaSum := sha256.New()
+		if _, err := io.Copy(shaSum, file); err != nil {
+			return nil, fmt.Errorf("failed to compute hash for %v", outputFilePath)
+		}
+		shaSumStr := fmt.Sprintf("%x", shaSum)
+
+		// If the index file hasn't changed, let's not re-parse it
+		if releaseFile, ok := a.ReleaseInfo[pocket]; ok && shaSumStr == releaseFile.Hash {
+			log.Debugf("[release] nothing to do %v", outputFilePath)
+			continue
+		}
+
+		log.Debugf("[release] parsing %v", outputFilePath)
+		releaseInfo[pocket], err = ParseReleaseFile(file)
+		releaseInfo[pocket].Hash = shaSumStr
 
 		if err != nil {
 			return nil, err
@@ -89,7 +120,13 @@ func (a *Archive) GetReleaseInfo() (map[string]*ReleaseFile, error) {
 }
 
 // ParseReleaseFile parses the content of a release file
-func ParseReleaseFile(raw []byte) (*ReleaseFile, error) {
+func ParseReleaseFile(file *os.File) (*ReleaseFile, error) {
+	file.Seek(0, 0)
+	raw, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
 	releaseFile := new(ReleaseFile)
 
 	txtFile := fmt.Sprintf("%s", raw)
@@ -134,7 +171,7 @@ func ParseReleaseFile(raw []byte) (*ReleaseFile, error) {
 		}
 
 		if strings.HasPrefix(line, "SHA256") {
-			releaseFile.Sha256 = make(map[string]ReleaseFileEntry, 0)
+			releaseFile.PackageIndex = make(map[string]ReleaseFileEntry, 0)
 			iLine++
 			for iLine < len(lines) {
 				line = lines[iLine]
@@ -153,7 +190,7 @@ func ParseReleaseFile(raw []byte) (*ReleaseFile, error) {
 					Size: uint(size),
 					Path: lineElmt[2],
 				}
-				releaseFile.Sha256[fileEntry.Path] = fileEntry
+				releaseFile.PackageIndex[fileEntry.Path] = fileEntry
 
 				iLine++
 			}
@@ -163,8 +200,12 @@ func ParseReleaseFile(raw []byte) (*ReleaseFile, error) {
 	return releaseFile, nil
 }
 
-func downlaodFile(client *resty.Client, fileURL url.URL, outputFilePath string) error {
-	resp, err := client.R().
+func downloadFile(client *resty.Client, fileURL url.URL, outputFilePath string) error {
+	resp, err := client.
+		SetRetryCount(3).
+		SetRetryWaitTime(5 * time.Second).
+		SetRetryMaxWaitTime(20 * time.Second).
+		R().
 		SetOutput(outputFilePath).
 		Get(fileURL.String())
 	if err != nil {
@@ -172,7 +213,7 @@ func downlaodFile(client *resty.Client, fileURL url.URL, outputFilePath string) 
 	}
 
 	if resp.IsError() {
-		return fmt.Errorf("failed to fetch Release file from %v (%v)", fileURL, resp.Status())
+		return fmt.Errorf("failed to fetch file from %v (%v)", fileURL, resp.Status())
 	}
 
 	return nil
@@ -181,7 +222,7 @@ func downlaodFile(client *resty.Client, fileURL url.URL, outputFilePath string) 
 // DownloadIfNeeded downloads the package index files for the given pocket
 // if the hashes from filesToDownload are direrent from the ones in a.ReleaseInfo
 // returns the number of files downloaded
-func (a *Archive) DownloadIfNeeded(pocket string, filesToDownload map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
+func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
 	pocketBaseURL := url.URL(a.BaseURL)
 	pocketBaseURL.Path = path.Join(pocketBaseURL.Path, pocket)
 
@@ -191,9 +232,12 @@ func (a *Archive) DownloadIfNeeded(pocket string, filesToDownload map[string]Rel
 	nbFile := 0
 	wg := new(sync.WaitGroup)
 	for filePath, fileInfo := range filesToDownload {
-		if a.ReleaseInfo != nil && fileInfo.Hash == a.ReleaseInfo[pocket].Sha256[filePath].Hash {
-			continue
+		if a.ReleaseInfo != nil {
+			if _, ok := a.ReleaseInfo[pocket]; ok && fileInfo.Hash == a.ReleaseInfo[pocket].PackageIndex[filePath].Hash {
+				continue
+			}
 		}
+
 		nbFile++
 		fileURL := url.URL(pocketPortsURL)
 		if strings.Contains(filePath, "amd64") || strings.Contains(filePath, "i386") {
@@ -207,15 +251,17 @@ func (a *Archive) DownloadIfNeeded(pocket string, filesToDownload map[string]Rel
 		go func(fileURL url.URL, fileName string) {
 			defer wg.Done()
 			filePath := path.Join(a.CacheDir, fileName)
-			err := downlaodFile(a.Client, fileURL, filePath)
-			if err != nil {
-				log.Println(err)
-				return
+			if !local {
+				err := downloadFile(a.Client, fileURL, filePath)
+				if err != nil {
+					log.Errorf("error downloading: %v: %v", fileURL.String(), err)
+					return
+				}
 			}
 
-			err = a.parsePackageIndex(packagesChan, fileName)
+			err := a.parsePackageIndex(packagesChan, fileName)
 			if err != nil {
-				log.Println(err)
+				log.Errorf("failed to parse package index %v: %v", fileName, err)
 			}
 		}(fileURL, outputFileName)
 	}
@@ -225,7 +271,7 @@ func (a *Archive) DownloadIfNeeded(pocket string, filesToDownload map[string]Rel
 	return nbFile, nil
 }
 
-func (a *Archive) refreshCacheForPocket(pocket string, releaseInfo map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
+func (a *Archive) refreshCacheForPocket(local bool, pocket string, releaseInfo map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
 	filesToDownload := make(map[string]ReleaseFileEntry)
 
 	for filePath, info := range releaseInfo {
@@ -234,7 +280,7 @@ func (a *Archive) refreshCacheForPocket(pocket string, releaseInfo map[string]Re
 		}
 	}
 
-	nbFile, err := a.DownloadIfNeeded(pocket, filesToDownload, packagesChan)
+	nbFile, err := a.DownloadIfNeeded(local, pocket, filesToDownload, packagesChan)
 	if err != nil {
 		return nbFile, err
 	}
@@ -243,23 +289,36 @@ func (a *Archive) refreshCacheForPocket(pocket string, releaseInfo map[string]Re
 
 // RefreshCache checks if the archive indexes have changed and
 // redownload them if needed
-func (a *Archive) RefreshCache() (int, int, error) {
-	newInfo, err := a.GetReleaseInfo()
+func (a *Archive) RefreshCache(local bool) (int, int, error) {
+	newInfo, err := a.GetReleaseInfo(local)
 	if err != nil {
 		return 0, 0, err
 	}
+	log.Debug("[release] finished processing release indexes")
 
 	totalNbFile := 0
 
-	packages := make(chan *PackageInfo, 100)
+	packages := make(chan *PackageInfo, 1000)
 	wg := new(sync.WaitGroup)
 	for _, pocket := range a.Pockets {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
-			nbFile, err := a.refreshCacheForPocket(p, newInfo[p].Sha256, packages)
+			var (
+				nbFile int
+				err    error
+			)
+
+			// if newInfo[p] does not exists, it means it hasn't changed, there
+			// is nothing to refresh
+			if _, ok := newInfo[p]; !ok {
+				return
+			}
+
+			nbFile, err = a.refreshCacheForPocket(local, p, newInfo[p].PackageIndex, packages)
+			log.Debugf("[packages][%v] refreshed", p)
 			if err != nil {
-				log.Println(err)
+				log.Error(err)
 				return
 			}
 			totalNbFile += nbFile
@@ -426,39 +485,4 @@ func (a *Archive) updatePackageInfo(packages chan *PackageInfo, done chan struct
 			return
 		}
 	}
-}
-
-// InitCache reads the files on disk and parese them
-// Using this function avoid redownloading the entire cache from
-// the archive when the apps start.
-func (a *Archive) InitCache() (int, error) {
-	files, err := os.ReadDir(a.CacheDir)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(files) == 0 {
-		return 0, nil
-	}
-
-	packagesChan := make(chan *PackageInfo, 100)
-	done := make(chan struct{})
-	stats := make(chan int)
-	go a.updatePackageInfo(packagesChan, done, stats)
-
-	wg := new(sync.WaitGroup)
-	for _, file := range files {
-		wg.Add(1)
-		go func(path string) {
-			defer wg.Done()
-			err := a.parsePackageIndex(packagesChan, path)
-			if err != nil {
-				log.Println(err)
-			}
-		}(file.Name())
-	}
-	wg.Wait()
-	done <- struct{}{}
-
-	return <-stats, nil
 }

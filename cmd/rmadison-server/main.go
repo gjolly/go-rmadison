@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,7 +11,16 @@ import (
 
 	"github.com/gjolly/go-rmadisson/pkg/debian"
 	"github.com/go-resty/resty/v2"
+	"go.uber.org/zap"
 )
+
+var log *zap.SugaredLogger
+
+func init() {
+	// Logger for the operations
+	logger, _ := zap.NewDevelopment()
+	log = logger.Sugar()
+}
 
 type httpHandler struct {
 	Cache *debian.Archive
@@ -20,7 +28,7 @@ type httpHandler struct {
 
 func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg := strings.TrimLeft(r.URL.Path, "/")
-	log.Printf("lookup for %v", pkg)
+	log.Debugf("lookup for %v", pkg)
 
 	if strings.Contains(pkg, "/") {
 		w.WriteHeader(http.StatusNotFound)
@@ -57,7 +65,6 @@ func main() {
 	if cacheDir == "" {
 		cacheDir, _ = os.MkdirTemp("", "gormadisontest")
 	}
-
 	baseURL, _ := url.Parse("http://archive.ubuntu.com/ubuntu/dists")
 	portsURL, _ := url.Parse("http://ports.ubuntu.com/dists")
 
@@ -75,22 +82,23 @@ func main() {
 		CacheDir: cacheDir,
 	}
 
-	packages, err := cache.InitCache()
+	log.Info("Reading local cache")
+	_, packages, err := cache.RefreshCache(true)
 	if err != nil {
-		log.Println("error reading existing cache data", err)
+		log.Error("error reading existing cache data:", err)
 	}
-	log.Println("packages in cache:", packages)
+	log.Infof("packages in cache: %v", packages)
 
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		for {
 			now := time.Now()
-			_, pkgStats, err := cache.RefreshCache()
+			_, pkgStats, err := cache.RefreshCache(false)
 			duration := time.Now().Sub(now)
 			if err != nil {
-				log.Printf("cache refreshed (with error '%v') in %v, %v packages in db", err, duration.Seconds(), pkgStats)
+				log.Errorf("cache refreshed in %v (with error %v), %v packages updated", duration.Seconds(), err, pkgStats)
 			} else {
-				log.Printf("cache refreshed in %v, %v packages in db", duration.Seconds(), pkgStats)
+				log.Infof("cache refreshed in %v, %v packages updated", duration.Seconds(), pkgStats)
 			}
 
 			<-t.C
@@ -108,6 +116,6 @@ func main() {
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-	log.Printf("starting http server on %v\n", addr)
+	log.Infof("starting http server on %v\n", addr)
 	log.Fatal(s.ListenAndServe())
 }

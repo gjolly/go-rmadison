@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/gjolly/go-rmadisson/pkg/debian"
@@ -20,19 +21,43 @@ func contains(elmt string, slice []string) bool {
 	return false
 }
 
+func sortArch(line []string) {
+	archs := line[3]
+	archList := strings.Split(archs, ", ")
+	sort.Strings(archList)
+
+	line[3] = strings.Join(archList, ", ")
+}
+
+func groupByComponent(lines [][]string) [][]string {
+	linesBySeries := make(map[string][]string)
+	for _, line := range lines {
+		key := line[2]
+		if newLine, ok := linesBySeries[key]; ok {
+			newLine[3] += ", " + line[3]
+			continue
+		}
+		linesBySeries[key] = line
+	}
+
+	out := make([][]string, len(linesBySeries))
+	i := 0
+	for _, line := range linesBySeries {
+		sortArch(line)
+		out[i] = line
+
+		i++
+	}
+
+	return out
+}
+
 func main() {
 	client := resty.New()
 
-	architectureFlag := flag.String("architecture", "amd64", "only show info for ARCH(s)")
-	componentFlag := flag.String("component", "main,universe,multiverse", "only show info for COMPONENT(s)")
-	suiteFlag := flag.String("suite", "bionic,focal,impish,jammy,kinetic", "only show info for this suite")
 	flag.Parse()
 
 	pkg := flag.Arg(0)
-
-	architectures := strings.Split(*architectureFlag, ",")
-	components := strings.Split(*componentFlag, ",")
-	suites := strings.Split(*suiteFlag, ",")
 
 	baseURL := "http://localhost:8433"
 
@@ -53,9 +78,6 @@ func main() {
 	widths := make([]int, 4)
 	lines := make([][]string, 0)
 	for _, info := range pkgInfo {
-		if !contains(info.Component, components) || !contains(info.Suite, suites) || !contains(info.Architecture, architectures) {
-			continue
-		}
 		formatedComponent := ""
 		if info.Component != "main" {
 			formatedComponent = "/" + info.Component
@@ -68,6 +90,8 @@ func main() {
 		}
 		lines = append(lines, line)
 	}
+
+	lines = groupByComponent(lines)
 
 	lineFormat := fmt.Sprintf(" %%-%vv | %%-%vv | %%-%vv | %%-%vv\n", widths[0], widths[1], widths[2], widths[3])
 	for _, line := range lines {
