@@ -1,4 +1,4 @@
-module github.com/gjolly/go-rmadisson
+module github.com/gjolly/go-rmadison
 
 go 1.18
 

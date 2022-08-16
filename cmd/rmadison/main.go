@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gjolly/go-rmadisson/pkg/debian"
+	"github.com/gjolly/go-rmadison/pkg/debian"
 	"github.com/go-resty/resty/v2"
 )
 

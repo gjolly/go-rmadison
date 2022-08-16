@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gjolly/go-rmadisson/pkg/debian"
+	"github.com/gjolly/go-rmadison/pkg/debian"
 	"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
 )
