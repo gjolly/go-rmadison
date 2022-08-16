@@ -251,7 +251,7 @@ func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload ma
 		go func(fileURL url.URL, fileName string) {
 			defer wg.Done()
 			filePath := path.Join(a.CacheDir, fileName)
-			if !local {
+			if _, err := os.Stat(filePath); !local || errors.Is(err, os.ErrNotExist) {
 				err := downloadFile(a.Client, fileURL, filePath)
 				if err != nil {
 					log.Errorf("error downloading: %v: %v", fileURL.String(), err)
