@@ -1,0 +1,17 @@
+cache_directory: /tmp/cache
+
+archives:
+  - base_url: http://archive.ubuntu.com/ubuntu/dists
+    ports_url: http://ports.ubuntu.com/dists
+    pockets:
+      - xenial
+      - bionic
+      - bionic-updates
+      - focal
+      - focal-updates
+      - jammy
+      - jammy-updates
+      - kinetic
+  - base_url: https://esm.ubuntu.com/infra/ubuntu/dists
+    pockets:
+      - xenial-infra-updates

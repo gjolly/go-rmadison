@@ -53,8 +53,8 @@ type ReleaseFile struct {
 
 // Archive is a debian archive
 type Archive struct {
-	BaseURL     url.URL
-	PortsURL    url.URL
+	BaseURL     *url.URL
+	PortsURL    *url.URL
 	Client      *resty.Client
 	ReleaseInfo map[string]*ReleaseFile
 	Pockets     []string
@@ -63,7 +63,7 @@ type Archive struct {
 }
 
 func (a *Archive) getReleaseFileLocationsForPocket(pocket string) (url.URL, string) {
-	fileURL := url.URL(a.BaseURL)
+	fileURL := url.URL(*a.BaseURL)
 	fileURL.Path = path.Join(fileURL.Path, pocket, "InRelease")
 	outputFileName := strings.ReplaceAll(fileURL.Hostname()+fileURL.Path, "/", "_")
 
@@ -109,6 +109,10 @@ func (a *Archive) GetReleaseInfo(local bool) (map[string]*ReleaseFile, error) {
 
 		log.Debugf("[release] parsing %v", outputFilePath)
 		releaseInfo[pocket], err = ParseReleaseFile(file)
+		if err != nil {
+			log.Errorf("failed to parse Release file (%v): %v", outputFilePath, err)
+			continue
+		}
 		releaseInfo[pocket].Hash = shaSumStr
 
 		if err != nil {
@@ -223,10 +227,10 @@ func downloadFile(client *resty.Client, fileURL url.URL, outputFilePath string) 
 // if the hashes from filesToDownload are direrent from the ones in a.ReleaseInfo
 // returns the number of files downloaded
 func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
-	pocketBaseURL := url.URL(a.BaseURL)
+	pocketBaseURL := url.URL(*a.BaseURL)
 	pocketBaseURL.Path = path.Join(pocketBaseURL.Path, pocket)
 
-	pocketPortsURL := url.URL(a.PortsURL)
+	pocketPortsURL := url.URL(*a.PortsURL)
 	pocketPortsURL.Path = path.Join(pocketPortsURL.Path, pocket)
 
 	nbFile := 0
@@ -257,6 +261,7 @@ func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload ma
 					log.Errorf("error downloading: %v: %v", fileURL.String(), err)
 					return
 				}
+				log.Debugf("[package][%v] Downloaded %v", pocket, filePath)
 			}
 
 			err := a.parsePackageIndex(packagesChan, fileName)
