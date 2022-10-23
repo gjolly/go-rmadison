@@ -12,7 +12,9 @@ archives:
       - jammy
       - jammy-updates
       - kinetic
+      - kinetic-updates
   - base_url: https://esm.ubuntu.com/infra/ubuntu/dists
     ports_url: https://esm.ubuntu.com/infra/ubuntu/dists
     pockets:
+      - trusty-infra-updates
       - xenial-infra-updates
