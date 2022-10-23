@@ -3,17 +3,49 @@ package debian
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/jarcoal/httpmock"
 )
 
+func generateReleaseFile(releaseFile ReleaseFile) string {
+	textFile := fmt.Sprintf("Origin: %v\n", releaseFile.Origin)
+	textFile += fmt.Sprintf("Label: %v\n", releaseFile.Label)
+	textFile += fmt.Sprintf("Suite: %v\n", releaseFile.Suite)
+	textFile += fmt.Sprintf("Version: %v\n", releaseFile.Version)
+	textFile += fmt.Sprintf("Codename: %v\n", releaseFile.Codename)
+	textFile += fmt.Sprintf("Date: %v\n", releaseFile.Date) // check format
+	textFile += fmt.Sprintf("Architectures: %v\n", releaseFile.Architectures)
+	textFile += fmt.Sprintf("Components: %v\n", releaseFile.Components)
+	textFile += fmt.Sprintf("Description: %v\n", releaseFile.Description)
+
+	// Sha256
+	textFile += "SHA256:\n"
+	for _, fileEntry := range releaseFile.PackageIndex {
+		textFile += fmt.Sprintf("%v %v %v %v\n", fileEntry.Hash, fileEntry.Size, fileEntry.Path)
+	}
+}
+
 func TestParseReleaseFile(t *testing.T) {
+	date, _ := time.Parse(time.RFC1123Z, "Thu, 26 Apr 2018 23:37:48 UTC")
+	releaseFileIn := ReleaseFile{
+		Origin:        "Ubuntu",
+		Suite:         "bionic",
+		Codename:      "18.04",
+		Date:          date,
+		Architectures: []string{"amd64", "arm64", "armhf", "i386", "ppc64el", "s390x"},
+		Components:    []string{"main", "restricted", "universe", "multiverse"},
+		Description:   "Ubuntu Bionic 18.04",
+		},
+	}
+
 	content := `Origin: Ubuntu
 Label: Ubuntu
 Suite: bionic

@@ -123,6 +123,26 @@ func (a *Archive) GetReleaseInfo(local bool) (map[string]*ReleaseFile, error) {
 	return releaseInfo, nil
 }
 
+func parseIndexLine(line string) *ReleaseFileEntry {
+	lineElmt := strings.Fields(line)
+
+	// we reached the end of the file list
+	if len(lineElmt) != 3 {
+		return nil
+	}
+
+	size, err := strconv.Atoi(lineElmt[1])
+	if err != nil {
+		return nil
+	}
+
+	return &ReleaseFileEntry{
+		Hash: lineElmt[0],
+		Size: uint(size),
+		Path: lineElmt[2],
+	}
+}
+
 // ParseReleaseFile parses the content of a release file
 func ParseReleaseFile(file *os.File) (*ReleaseFile, error) {
 	file.Seek(0, 0)
@@ -179,22 +199,12 @@ func ParseReleaseFile(file *os.File) (*ReleaseFile, error) {
 			iLine++
 			for iLine < len(lines) {
 				line = lines[iLine]
-				lineElmt := strings.Fields(line)
-
+				fileEntry := parseIndexLine(line)
 				// we reached the end of the file list
-				if len(lineElmt) != 3 {
+				if fileEntry == nil {
 					break
 				}
-				size, err := strconv.Atoi(lineElmt[1])
-				if err != nil {
-					return nil, err
-				}
-				fileEntry := ReleaseFileEntry{
-					Hash: lineElmt[0],
-					Size: uint(size),
-					Path: lineElmt[2],
-				}
-				releaseFile.PackageIndex[fileEntry.Path] = fileEntry
+				releaseFile.PackageIndex[fileEntry.Path] = *fileEntry
 
 				iLine++
 			}

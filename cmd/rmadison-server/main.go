@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -96,10 +98,25 @@ type archiveYAMLConf struct {
 	Pockets  []string `yaml:"pockets"`
 }
 
-func parseConfig(configPath string) (*Config, error) {
-	configFile, err := os.Open(configPath)
+func parseConfig() (*Config, error) {
+	configPaths := []string{
+		"server.yaml",
+		"/etc/rmadison/server",
+	}
+	userConfigDir, err := os.UserConfigDir()
+	if err == nil {
+		configPaths = append(configPaths, path.Join(userConfigDir, "rmadison", "server.yaml"))
+	}
+
+	var configFile *os.File
+	for _, configPath := range configPaths {
+		configFile, err = os.Open(configPath)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot find any config file in %v", configPaths)
 	}
 
 	configBytes, err := ioutil.ReadAll(configFile)
@@ -117,10 +134,20 @@ func parseConfig(configPath string) (*Config, error) {
 	httpClient := resty.New()
 
 	for i, archiveConf := range rawConfig.Archives {
+		if archiveConf.BaseURL == "" {
+			return nil, fmt.Errorf("missing base_url for archive %v", i)
+		}
+
 		baseURL, err := url.Parse(archiveConf.BaseURL)
 		if err != nil {
 			return nil, err
 		}
+
+		if archiveConf.PortsURL == "" {
+			log.Infof("missing ports_url for archive %v, using base url", i)
+			archiveConf.PortsURL = archiveConf.BaseURL
+		}
+
 		portsURL, err := url.Parse(archiveConf.PortsURL)
 		if err != nil {
 			return nil, err
@@ -144,7 +171,7 @@ func main() {
 		cacheDir, _ = os.MkdirTemp("", "gormadisontest")
 	}
 
-	conf, err := parseConfig("config.yaml")
+	conf, err := parseConfig()
 	if err != nil {
 		log.Fatalf("failed to read config file: %v", err)
 	}

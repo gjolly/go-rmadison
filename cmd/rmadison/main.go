@@ -33,7 +33,8 @@ func groupByComponent(lines [][]string) [][]string {
 	linesBySeries := make(map[string][]string)
 	for _, line := range lines {
 		key := line[2]
-		if newLine, ok := linesBySeries[key]; ok {
+		version := line[1]
+		if newLine, ok := linesBySeries[key]; ok && newLine[1] == version {
 			newLine[3] += ", " + line[3]
 			continue
 		}
