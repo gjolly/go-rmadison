@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gjolly/go-rmadison/pkg/debian"
+	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -64,7 +64,7 @@ func main() {
 
 	queryURL := fmt.Sprintf("%v/%v", baseURL, pkg)
 
-	var pkgInfo []debian.PackageInfo
+	var pkgInfo []debianpkg.PackageInfo
 	resp, err := client.R().
 		SetResult(&pkgInfo).
 		Get(queryURL)
