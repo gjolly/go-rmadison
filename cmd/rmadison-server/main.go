@@ -190,6 +190,8 @@ func startPprofServer(addr string) {
 }
 
 func main() {
+	go startPprofServer(":8434")
+
 	flag.Parse()
 	cacheDir := flag.Arg(0)
 	if cacheDir == "" {
@@ -219,9 +221,6 @@ func main() {
 		Caches: conf.Caches,
 	}
 
-	log.Debug("sleeping")
-	time.Sleep(time.Second * 100)
-	go startPprofServer(":8434")
 	addr := ":8433"
 	s := &http.Server{
 		Addr:           addr,
