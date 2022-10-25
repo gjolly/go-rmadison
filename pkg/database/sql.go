@@ -39,7 +39,7 @@ func NewConn(path string) (*DB, error) {
 func (db *DB) createTableIfNeeded() error {
 	res, err := db.Query("SELECT COUNT(name) FROM sqlite_master WHERE type='table' AND name=?", db.tableName)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get tables from DB")
+		return errors.Wrap(err, "failed to get tables from DB")
 	}
 	res.Next()
 	var n int
@@ -49,7 +49,12 @@ func (db *DB) createTableIfNeeded() error {
 	if n != 0 {
 		return nil
 	}
-	_, err = db.Exec(`CREATE TABLE packages (
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`CREATE TABLE packages (
 		'name' VARCHAR(64) NOT NULL,
 		'version' VARCHAR(64) NOT NULL,
 		'component' VARCHAR(64) NOT NULL,
@@ -70,8 +75,18 @@ func (db *DB) createTableIfNeeded() error {
 		'description' VARCHAR(64) NULL,
 		PRIMARY KEY ('name', 'component', 'suite', 'pocket', 'architecture')
 	)`)
+	if err != nil {
+		tx.Rollback()
+		return errors.Wrap(err, "Failed to create tables in DB")
+	}
 
-	return errors.Wrap(err, "Failed to create tables in DB")
+	_, err = tx.Exec("CREATE INDEX idx_name ON packages (name)")
+	if err != nil {
+		tx.Rollback()
+		return errors.Wrap(err, "failed to create index")
+	}
+
+	return tx.Commit()
 }
 
 // GetPackage from the db
