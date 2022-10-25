@@ -179,11 +179,8 @@ func startPprofServer(addr string) {
 	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	s := &http.Server{
-		Addr:           addr,
-		Handler:        r,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
+		Addr:    addr,
+		Handler: r,
 	}
 	log.Infof("starting pprof server on %v\n", addr)
 	log.Fatal(s.ListenAndServe())
