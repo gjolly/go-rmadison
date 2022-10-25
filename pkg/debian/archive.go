@@ -410,8 +410,8 @@ func parsePackageIndexFile(out chan *PackageInfo, rawBody, suite, pocket, compon
 				//fmt.Printf("failed to parse property: %#v\n", rawAttribute)
 				continue
 			}
-			key := rawAttribute[0]
-			value := strings.TrimPrefix(cleanLine, fmt.Sprintf("%v: ", key))
+			key := strings.Clone(rawAttribute[0])
+			value := strings.Clone(strings.TrimPrefix(cleanLine, fmt.Sprintf("%v: ", key)))
 
 			// here we assume that we see Package before any other field
 			// it makes sense but it's also not very safe
