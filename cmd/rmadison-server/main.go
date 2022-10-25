@@ -152,7 +152,7 @@ func parseConfig() (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		db, err := database.NewConn(archiveConf.Database)
+		db, err := database.NewConn("sqlite3", archiveConf.Database)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to connect to database %v", archiveConf.Database)
 		}

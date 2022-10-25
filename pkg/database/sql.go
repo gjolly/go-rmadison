@@ -17,8 +17,8 @@ type DB struct {
 }
 
 // NewConn initialize a connection to the DB
-func NewConn(path string) (*DB, error) {
-	rawdb, err := sql.Open("sqlite3", path)
+func NewConn(driver, path string) (*DB, error) {
+	rawdb, err := sql.Open(driver, path)
 	if err != nil {
 		return nil, err
 	}
@@ -28,12 +28,25 @@ func NewConn(path string) (*DB, error) {
 		nil,
 	}
 
+	err = db.setupDB(driver)
+
 	err = db.createTableIfNeeded()
 	if err != nil {
 		return nil, err
 	}
 
 	return db, nil
+}
+
+func (db *DB) setupDB(driver string) error {
+	if driver == "sqlite3" {
+		// don't block reads
+		// see https://www.sqlite.org/wal.html
+		_, err := db.Exec("PRAGMA journal_mode=WAL")
+		return err
+	}
+
+	return nil
 }
 
 func (db *DB) createTableIfNeeded() error {
@@ -95,6 +108,7 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	pkgInfo := make([]*debianpkg.PackageInfo, 0)
 
@@ -139,7 +153,7 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 		pkgInfo = append(pkgInfo, info)
 	}
 
-	return pkgInfo, nil
+	return pkgInfo, rows.Err()
 }
 
 // PrepareInsertPackage add a statement in the prepared list
