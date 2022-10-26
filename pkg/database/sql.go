@@ -82,9 +82,11 @@ func (db *DB) createTableIfNeeded() error {
 		'size' INTEGER NOT NULL,
 		'install_size' VARCHAR(64) NULL,
 		'file_name' VARCHAR(64) NOT NULL,
-		'replace' VARCHAR(64) NULL,
-		'conflicts' VARCHAR(64) NULL,
-		'suggests' VARCHAR(64) NULL,
+		'depends' VARCHAR(200) NULL,
+		'pre_depends' VARCHAR(200) NULL,
+		'replace' VARCHAR(200) NULL,
+		'conflicts' VARCHAR(200) NULL,
+		'suggests' VARCHAR(200) NULL,
 		'description' VARCHAR(64) NULL,
 		PRIMARY KEY ('name', 'component', 'suite', 'pocket', 'architecture')
 	)`)
@@ -117,9 +119,11 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 		info.Maintainer = new(debianpkg.PackageMaintainer)
 
 		var (
-			replaces  string
-			conflicts string
-			suggests  string
+			depends    string
+			predepends string
+			replaces   string
+			conflicts  string
+			suggests   string
 		)
 
 		err = rows.Scan(
@@ -137,6 +141,8 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 			&info.Size,
 			&info.InstalledSize,
 			&info.FileName,
+			&depends,
+			&predepends,
 			&replaces,
 			&conflicts,
 			&suggests,
@@ -146,6 +152,8 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 			return nil, err
 		}
 
+		info.Depends = strings.Split(depends, ", ")
+		info.PreDepends = strings.Split(predepends, ", ")
 		info.Suggests = strings.Split(suggests, ", ")
 		info.Replaces = strings.Split(replaces, ", ")
 		info.Conflicts = strings.Split(conflicts, ", ")
@@ -178,7 +186,7 @@ func (db *DB) PrepareInsertPackage(pkgInfo *debianpkg.PackageInfo) error {
 		maintainerEmail = pkgInfo.Maintainer.Email
 	}
 
-	_, err = db.transaction.Exec("INSERT OR REPLACE INTO packages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err = db.transaction.Exec("INSERT OR REPLACE INTO packages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		pkgInfo.Name,
 		pkgInfo.Version,
 		pkgInfo.Component,
@@ -193,6 +201,8 @@ func (db *DB) PrepareInsertPackage(pkgInfo *debianpkg.PackageInfo) error {
 		pkgInfo.Size,
 		pkgInfo.InstalledSize,
 		pkgInfo.FileName,
+		strings.Join(pkgInfo.Depends, ", "),
+		strings.Join(pkgInfo.PreDepends, ", "),
 		strings.Join(pkgInfo.Replaces, ", "),
 		strings.Join(pkgInfo.Conflicts, ", "),
 		strings.Join(pkgInfo.Suggests, ", "),
@@ -216,86 +226,4 @@ func (db *DB) InsertPrepared() error {
 
 	db.transaction = nil
 	return nil
-}
-
-// InsertPackage to the db
-func (db *DB) InsertPackage(pkgInfo *debianpkg.PackageInfo) error {
-	t, err := db.Begin()
-	if err != nil {
-		return err
-	}
-
-	res, err := t.Exec(
-		"UPDATE packages SET name = ?, version = ?, component = ?, suite = ?, pocket = ?, architecture = ?, source = ?, section = ?, maintainer_name = ?, maintainer_email = ?, sha256 = ?, size = ?, install_size = ?, file_name = ?, replace = ?, conflicts = ?, suggests = ?, description = ? where name = ? AND component = ? AND suite = ? AND pocket = ? AND architecture = ?",
-		// update
-		pkgInfo.Name,
-		pkgInfo.Version,
-		pkgInfo.Component,
-		pkgInfo.Suite,
-		pkgInfo.Pocket,
-		pkgInfo.Architecture,
-		pkgInfo.Source,
-		pkgInfo.Section,
-		pkgInfo.Maintainer.Name,
-		pkgInfo.Maintainer.Email,
-		pkgInfo.SHA256,
-		pkgInfo.Size,
-		pkgInfo.InstalledSize,
-		pkgInfo.FileName,
-		strings.Join(pkgInfo.Replaces, ", "),
-		strings.Join(pkgInfo.Conflicts, ", "),
-		strings.Join(pkgInfo.Suggests, ", "),
-		pkgInfo.Description,
-		// where
-		pkgInfo.Name,
-		pkgInfo.Component,
-		pkgInfo.Suite,
-		pkgInfo.Pocket,
-		pkgInfo.Architecture,
-	)
-	if err != nil {
-		t.Rollback()
-		return err
-	}
-
-	n, err := res.RowsAffected()
-	if err != nil {
-		t.Rollback()
-		return err
-	}
-	if n != 0 {
-		t.Commit()
-		return nil
-	}
-
-	// no row updated, we need to insert new data
-	res, err = t.Exec(
-		"INSERT INTO packages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		pkgInfo.Name,
-		pkgInfo.Version,
-		pkgInfo.Component,
-		pkgInfo.Suite,
-		pkgInfo.Pocket,
-		pkgInfo.Architecture,
-		pkgInfo.Source,
-		pkgInfo.Section,
-		pkgInfo.Maintainer.Name,
-		pkgInfo.Maintainer.Email,
-		pkgInfo.SHA256,
-		pkgInfo.Size,
-		pkgInfo.InstalledSize,
-		pkgInfo.FileName,
-		strings.Join(pkgInfo.Replaces, ", "),
-		strings.Join(pkgInfo.Conflicts, ", "),
-		strings.Join(pkgInfo.Suggests, ", "),
-		pkgInfo.Description,
-	)
-	if err != nil {
-		t.Rollback()
-		return err
-	}
-
-	err = t.Commit()
-
-	return err
 }

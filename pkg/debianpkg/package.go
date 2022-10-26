@@ -28,6 +28,8 @@ type PackageInfo struct {
 	Size          int                `json:"size"`
 	InstalledSize int                `json:"installed-size"`
 	FileName      string             `json:"filename"`
+	Depends       []string           `json:"depends"`
+	PreDepends    []string           `json:"pre-depends"`
 	Replaces      []string           `json:"replaces"`
 	Conflicts     []string           `json:"conflicts"`
 	Suggests      []string           `json:"suggests"`
@@ -54,6 +56,14 @@ func (pkgInfo *PackageInfo) Set(key, value string) error {
 	}
 	if key == "Installed-Size" {
 		pkgInfo.InstalledSize, _ = strconv.Atoi(value)
+		return nil
+	}
+	if key == "Depends" {
+		pkgInfo.Depends = strings.Split(value, ", ")
+		return nil
+	}
+	if key == "Pre-Depends" {
+		pkgInfo.PreDepends = strings.Split(value, ", ")
 		return nil
 	}
 	if key == "Conflicts" {
