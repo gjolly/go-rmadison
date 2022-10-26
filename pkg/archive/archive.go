@@ -463,8 +463,8 @@ func getInfoFromIndexName(name string) (string, string, string, string, error) {
 	suitePocketList := strings.Split(suitePocket, "-")
 	suite := suitePocketList[0]
 	pocket := ""
-	if len(suitePocketList) == 2 {
-		pocket = "-" + suitePocketList[1]
+	if len(suitePocketList) > 1 {
+		pocket = "-" + strings.Join(suitePocketList[1:], "-")
 	}
 	arch := strings.Split(binaryArch, "-")[1]
 
