@@ -3,9 +3,10 @@ cache_directory: /tmp/cache
 archives:
   - base_url: http://archive.ubuntu.com/ubuntu/dists
     ports_url: http://ports.ubuntu.com/dists
-    database: "/tmp/db.sqlite"
+    database: "/home/ubuntu/.cache/rmadison/archive.ubuntu.com.sqlite"
     pockets:
       - xenial
+      - xenial-updates
       - bionic
       - bionic-updates
       - focal
@@ -14,9 +15,16 @@ archives:
       - jammy-updates
       - kinetic
       - kinetic-updates
-        #  - base_url: https://esm.ubuntu.com/infra/ubuntu/dists
-        #    ports_url: https://esm.ubuntu.com/infra/ubuntu/dists
-        #    database: "/tmp/db.sqlite"
-        #    pockets:
-        #      - trusty-infra-updates
-        #      - xenial-infra-updates
+  - base_url: https://esm.ubuntu.com/infra/ubuntu/dists
+    ports_url: https://esm.ubuntu.com/infra/ubuntu/dists
+    database: "/home/ubuntu/.cache/rmadison/esm.ubuntu.com.sqlite"
+    pockets:
+      - trusty-infra-security
+      - xenial-infra-security
+  - base_url: https://esm.ubuntu.com/fips/ubuntu/dists/
+    ports_url: https://esm.ubuntu.com/fips/ubuntu/dists/
+    database: "/home/ubuntu/.cache/rmadison/esm.ubuntu.com-fips.sqlite"
+    pockets:
+      - xenial
+      - bionic
+      - focal
