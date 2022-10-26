@@ -204,15 +204,6 @@ func main() {
 		log.Fatal("No archive defined in config file")
 	}
 
-	log.Info("Reading local cache")
-	for _, cache := range conf.Caches {
-		_, packages, err := cache.RefreshCache(true)
-		if err != nil {
-			log.Error("error reading existing cache data:", err)
-		}
-		log.Infof("packages in cache: %v", packages)
-	}
-
 	refreshCaches(conf.Caches)
 	handler := httpHandler{
 		Caches: conf.Caches,
