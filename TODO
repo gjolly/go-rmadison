@@ -1,0 +1,2 @@
+ * Reduce import time on startup by storing the files hashes in the DB
+ * Use a single database for all the archives: add a field to identify the archive in the db
