@@ -15,7 +15,6 @@ import (
 
 	"github.com/gjolly/go-rmadison/pkg/archive"
 	"github.com/gjolly/go-rmadison/pkg/database"
-	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/go-resty/resty/v2"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -33,7 +32,7 @@ func init() {
 }
 
 type httpHandler struct {
-	Caches []*archive.Archive
+	Database *database.DB
 }
 
 func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,15 +44,11 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allInfo := make([]*debianpkg.PackageInfo, 0)
-	for _, cache := range h.Caches {
-		allInfoArchive, err := cache.Database.GetPackage(pkg)
-		if err != nil {
-			log.Error(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		allInfo = append(allInfo, allInfoArchive...)
+	allInfo, err := h.Database.GetPackage(pkg)
+	if err != nil {
+		log.Error(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	jsonInfo, err := json.Marshal(allInfo)
@@ -88,13 +83,13 @@ func refreshCaches(archives []*archive.Archive) {
 
 // Config is the configuration of the rmadison server
 type Config struct {
-	Caches []*archive.Archive
+	Caches   []*archive.Archive
+	Database *database.DB
 }
 
 type archiveYAMLConf struct {
 	BaseURL  string   `yaml:"base_url"`
 	PortsURL string   `yaml:"ports_url"`
-	Database string   `yaml:"database"`
 	Pockets  []string `yaml:"pockets"`
 }
 
@@ -125,6 +120,8 @@ func parseConfig() (*Config, error) {
 	}
 	rawConfig := new(struct {
 		CacheDirectory string             `yaml:"cache_directory"`
+		Database       string             `yaml:"database"`
+		LogLevel       string             `yaml:"log_level"`
 		Archives       []*archiveYAMLConf `yaml:"archives"`
 	})
 	yaml.Unmarshal(configBytes, rawConfig)
@@ -132,6 +129,12 @@ func parseConfig() (*Config, error) {
 	conf.Caches = make([]*archive.Archive, len(rawConfig.Archives))
 
 	httpClient := resty.New()
+
+	db, err := database.NewConn("sqlite3", rawConfig.Database, log)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to connect to database %v", rawConfig.Database)
+	}
+	conf.Database = db
 
 	for i, archiveConf := range rawConfig.Archives {
 		if archiveConf.BaseURL == "" {
@@ -152,10 +155,6 @@ func parseConfig() (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		db, err := database.NewConn("sqlite3", archiveConf.Database)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to connect to database %v", archiveConf.Database)
-		}
 		conf.Caches[i] = &archive.Archive{
 			BaseURL:  baseURL,
 			PortsURL: portsURL,
@@ -163,6 +162,7 @@ func parseConfig() (*Config, error) {
 			CacheDir: rawConfig.CacheDirectory,
 			Client:   httpClient,
 			Database: db,
+			Log:      log,
 		}
 	}
 
@@ -190,10 +190,6 @@ func main() {
 	go startPprofServer(":8434")
 
 	flag.Parse()
-	cacheDir := flag.Arg(0)
-	if cacheDir == "" {
-		cacheDir, _ = os.MkdirTemp("", "gormadisontest")
-	}
 
 	conf, err := parseConfig()
 	if err != nil {
@@ -206,7 +202,7 @@ func main() {
 
 	refreshCaches(conf.Caches)
 	handler := httpHandler{
-		Caches: conf.Caches,
+		Database: conf.Database,
 	}
 
 	addr := ":8433"

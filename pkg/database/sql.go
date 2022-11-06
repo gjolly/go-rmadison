@@ -3,21 +3,25 @@ package database
 import (
 	"database/sql"
 	"strings"
+	"time"
 
 	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // DB is a package databse
 type DB struct {
 	*sql.DB
 
-	tableName   string
-	transaction *sql.Tx
+	tableName       string
+	transaction     *sql.Tx
+	packageInfoChan chan *debianpkg.PackageInfo
+	log             *zap.SugaredLogger
 }
 
 // NewConn initialize a connection to the DB
-func NewConn(driver, path string) (*DB, error) {
+func NewConn(driver, path string, log *zap.SugaredLogger) (*DB, error) {
 	rawdb, err := sql.Open(driver, path)
 	if err != nil {
 		return nil, err
@@ -26,14 +30,21 @@ func NewConn(driver, path string) (*DB, error) {
 		rawdb,
 		"packages",
 		nil,
+		make(chan *debianpkg.PackageInfo, 10000),
+		log,
 	}
 
 	err = db.setupDB(driver)
+	if err != nil {
+		return nil, err
+	}
 
 	err = db.createTableIfNeeded()
 	if err != nil {
 		return nil, err
 	}
+
+	go db.writer(5 * time.Second)
 
 	return db, nil
 }
@@ -60,6 +71,7 @@ func (db *DB) createTableIfNeeded() error {
 	res.Close()
 
 	if n != 0 {
+		db.log.Info("Table already exist, skipping creation")
 		return nil
 	}
 	tx, err := db.Begin()
@@ -88,7 +100,8 @@ func (db *DB) createTableIfNeeded() error {
 		'conflicts' VARCHAR(200) NULL,
 		'suggests' VARCHAR(200) NULL,
 		'description' VARCHAR(64) NULL,
-		PRIMARY KEY ('name', 'component', 'suite', 'pocket', 'architecture')
+		'archive_url' VARCHAR(64) NOT NULL,
+		PRIMARY KEY ('name', 'component', 'suite', 'pocket', 'architecture', 'archive_url')
 	)`)
 	if err != nil {
 		tx.Rollback()
@@ -100,6 +113,8 @@ func (db *DB) createTableIfNeeded() error {
 		tx.Rollback()
 		return errors.Wrap(err, "failed to create index")
 	}
+
+	db.log.Infof("Table '%v' created", db.tableName)
 
 	return tx.Commit()
 }
@@ -147,6 +162,7 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 			&conflicts,
 			&suggests,
 			&info.Description,
+			&info.ArchiveURL,
 		)
 		if err != nil {
 			return nil, err
@@ -164,9 +180,46 @@ func (db *DB) GetPackage(pkgName string) ([]*debianpkg.PackageInfo, error) {
 	return pkgInfo, rows.Err()
 }
 
-// PrepareInsertPackage add a statement in the prepared list
+// InsertPackage inserts a package into the DB
+func (db *DB) InsertPackage(pkgInfo *debianpkg.PackageInfo) {
+	db.packageInfoChan <- pkgInfo
+}
+
+func (db *DB) writer(forceFlushDuration time.Duration) {
+	nbPkg := 0
+	t := time.NewTicker(forceFlushDuration)
+	for {
+		select {
+		case pkgInfo := <-db.packageInfoChan:
+			if pkgInfo == nil {
+				return
+			}
+
+			if nbPkg == 10000 {
+				err := db.flush()
+				if err != nil {
+					db.log.Error(err)
+				}
+				nbPkg = 0
+				continue
+			}
+
+			err := db.insetPkgInTransaction(pkgInfo)
+			if err != nil {
+				db.log.Error(err)
+			}
+		case <-t.C:
+			err := db.flush()
+			if err != nil {
+				db.log.Error(err)
+			}
+		}
+	}
+}
+
+// insetPkgInTransaction add a statement in the prepared list
 // but do not commit anything to the db
-func (db *DB) PrepareInsertPackage(pkgInfo *debianpkg.PackageInfo) error {
+func (db *DB) insetPkgInTransaction(pkgInfo *debianpkg.PackageInfo) error {
 	var err error
 
 	if db.transaction == nil {
@@ -186,7 +239,7 @@ func (db *DB) PrepareInsertPackage(pkgInfo *debianpkg.PackageInfo) error {
 		maintainerEmail = pkgInfo.Maintainer.Email
 	}
 
-	_, err = db.transaction.Exec("INSERT OR REPLACE INTO packages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err = db.transaction.Exec("INSERT OR REPLACE INTO packages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		pkgInfo.Name,
 		pkgInfo.Version,
 		pkgInfo.Component,
@@ -207,15 +260,17 @@ func (db *DB) PrepareInsertPackage(pkgInfo *debianpkg.PackageInfo) error {
 		strings.Join(pkgInfo.Conflicts, ", "),
 		strings.Join(pkgInfo.Suggests, ", "),
 		pkgInfo.Description,
+		pkgInfo.ArchiveURL,
 	)
 
 	return err
 }
 
-// InsertPrepared commit the current transaction
-func (db *DB) InsertPrepared() error {
+// flush commits the current transaction
+func (db *DB) flush() error {
 	if db.transaction == nil {
-		return errors.New("no transaction in progress")
+		db.log.Info("No transaction in progress, doing nothing")
+		return nil
 	}
 
 	err := db.transaction.Commit()

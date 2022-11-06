@@ -20,6 +20,7 @@ type PackageInfo struct {
 	Component     string             `json:"component"`
 	Suite         string             `json:"suite"`
 	Pocket        string             `json:"pocket"`
+	ArchiveURL    string             `json:"archive_url"`
 	Architecture  string             `json:"architecture"`
 	Source        string             `json:"source"`
 	Section       string             `json:"section"`
