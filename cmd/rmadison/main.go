@@ -60,7 +60,7 @@ func main() {
 
 	pkg := flag.Arg(0)
 
-	baseURL := "http://localhost:8433"
+	baseURL := "https://packages.gauthier.uk"
 
 	queryURL := fmt.Sprintf("%v/%v", baseURL, pkg)
 
@@ -93,6 +93,9 @@ func main() {
 	}
 
 	lines = groupByComponent(lines)
+	sort.Slice(lines, func(i, j int) bool {
+		return lines[i][2] < lines[j][2]
+	})
 
 	lineFormat := fmt.Sprintf(" %%-%vv | %%-%vv | %%-%vv | %%-%vv\n", widths[0], widths[1], widths[2], widths[3])
 	for _, line := range lines {
