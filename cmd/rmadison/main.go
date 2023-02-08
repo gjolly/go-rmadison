@@ -60,7 +60,7 @@ func main() {
 
 	pkg := flag.Arg(0)
 
-	baseURL := "http://localhost:8433"
+	baseURL := "https://packages.gauthier.uk"
 
 	queryURL := fmt.Sprintf("%v/%v", baseURL, pkg)
 
