@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -352,24 +351,6 @@ func (a *Archive) RefreshCache(local bool) (int, int, error) {
 	a.ReleaseInfo = newInfo
 
 	return totalNbFile, <-stats, nil
-}
-
-func (a *Archive) listFilesInCache(filter string) ([]string, error) {
-	files, err := os.ReadDir(a.CacheDir)
-	if err != nil {
-		return nil, err
-	}
-
-	filteredFiles := make([]string, 0)
-
-	re := regexp.MustCompile(filter)
-	for _, file := range files {
-		if re.MatchString(file.Name()) {
-			filteredFiles = append(filteredFiles, file.Name())
-		}
-	}
-
-	return filteredFiles, nil
 }
 
 func uncompressFile(path string) (string, error) {
