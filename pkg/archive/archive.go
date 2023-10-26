@@ -155,7 +155,7 @@ func ParseReleaseFile(file *os.File) (*ReleaseFile, error) {
 
 	releaseFile := new(ReleaseFile)
 
-	txtFile := fmt.Sprintf("%s", raw)
+	txtFile := string(raw)
 	lines := strings.Split(txtFile, "\n")
 
 	for iLine := 0; iLine < len(lines); iLine++ {
@@ -389,7 +389,7 @@ func uncompressFile(path string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s", result), nil
+	return string(result), nil
 }
 
 func parsePackageIndexFile(out chan *debianpkg.PackageInfo, rawBody, suite, pocket, component, arch string) error {
