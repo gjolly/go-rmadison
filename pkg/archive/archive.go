@@ -1,4 +1,4 @@
-package debian
+package archive
 
 import (
 	"compress/gzip"
@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gjolly/go-rmadison/pkg/database"
+	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/go-resty/resty/v2"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -59,7 +61,8 @@ type Archive struct {
 	ReleaseInfo map[string]*ReleaseFile
 	Pockets     []string
 	CacheDir    string
-	Packages    map[string]map[string]*PackageInfo
+	Database    *database.DB
+	DBPath      string
 }
 
 func (a *Archive) getReleaseFileLocationsForPocket(pocket string) (url.URL, string) {
@@ -236,7 +239,7 @@ func downloadFile(client *resty.Client, fileURL url.URL, outputFilePath string) 
 // DownloadIfNeeded downloads the package index files for the given pocket
 // if the hashes from filesToDownload are direrent from the ones in a.ReleaseInfo
 // returns the number of files downloaded
-func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
+func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload map[string]ReleaseFileEntry, packagesChan chan *debianpkg.PackageInfo) (int, error) {
 	pocketBaseURL := url.URL(*a.BaseURL)
 	pocketBaseURL.Path = path.Join(pocketBaseURL.Path, pocket)
 
@@ -286,7 +289,7 @@ func (a *Archive) DownloadIfNeeded(local bool, pocket string, filesToDownload ma
 	return nbFile, nil
 }
 
-func (a *Archive) refreshCacheForPocket(local bool, pocket string, releaseInfo map[string]ReleaseFileEntry, packagesChan chan *PackageInfo) (int, error) {
+func (a *Archive) refreshCacheForPocket(local bool, pocket string, releaseInfo map[string]ReleaseFileEntry, packagesChan chan *debianpkg.PackageInfo) (int, error) {
 	filesToDownload := make(map[string]ReleaseFileEntry)
 
 	for filePath, info := range releaseInfo {
@@ -313,7 +316,7 @@ func (a *Archive) RefreshCache(local bool) (int, int, error) {
 
 	totalNbFile := 0
 
-	packages := make(chan *PackageInfo, 1000)
+	packages := make(chan *debianpkg.PackageInfo, 1000)
 	wg := new(sync.WaitGroup)
 	for _, pocket := range a.Pockets {
 		wg.Add(1)
@@ -375,6 +378,7 @@ func uncompressFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer file.Close()
 	gzipReader, err := gzip.NewReader(file)
 	if err != nil {
 		return "", err
@@ -389,14 +393,14 @@ func uncompressFile(path string) (string, error) {
 	return fmt.Sprintf("%s", result), nil
 }
 
-func parsePackageIndexFile(out chan *PackageInfo, rawBody, suite, pocket, component, arch string) error {
+func parsePackageIndexFile(out chan *debianpkg.PackageInfo, rawBody, suite, pocket, component, arch string) error {
 	packageInfo := strings.Split(rawBody, "\n\n")
 
 	for _, info := range packageInfo {
 		infoLines := strings.Split(info, "\n")
 		pkgName := ""
 
-		var pkgInfo *PackageInfo
+		var pkgInfo *debianpkg.PackageInfo
 
 		for _, line := range infoLines {
 			cleanLine := strings.Trim(line, "\n")
@@ -417,7 +421,7 @@ func parsePackageIndexFile(out chan *PackageInfo, rawBody, suite, pocket, compon
 			// it makes sense but it's also not very safe
 			if key == "Package" {
 				pkgName = value
-				pkgInfo = &PackageInfo{
+				pkgInfo = &debianpkg.PackageInfo{
 					Name:         pkgName,
 					Component:    component,
 					Suite:        suite,
@@ -425,8 +429,11 @@ func parsePackageIndexFile(out chan *PackageInfo, rawBody, suite, pocket, compon
 					Architecture: arch,
 				}
 			}
-			if key == "Version" {
-				pkgInfo.Version = value
+			if pkgInfo != nil {
+				err := pkgInfo.Set(key, value)
+				if err != nil {
+					log.Debugf("[package] error reading maintainer info (%v): %v", pkgInfo.Name, err)
+				}
 			}
 		}
 
@@ -456,15 +463,15 @@ func getInfoFromIndexName(name string) (string, string, string, string, error) {
 	suitePocketList := strings.Split(suitePocket, "-")
 	suite := suitePocketList[0]
 	pocket := ""
-	if len(suitePocketList) == 2 {
-		pocket = "-" + suitePocketList[1]
+	if len(suitePocketList) > 1 {
+		pocket = "-" + strings.Join(suitePocketList[1:], "-")
 	}
 	arch := strings.Split(binaryArch, "-")[1]
 
 	return suite, pocket, component, arch, nil
 }
 
-func (a *Archive) parsePackageIndex(out chan *PackageInfo, file string) error {
+func (a *Archive) parsePackageIndex(out chan *debianpkg.PackageInfo, file string) error {
 	filePath := path.Join(a.CacheDir, file)
 	textFile, err := uncompressFile(filePath)
 	if err != nil {
@@ -479,23 +486,31 @@ func (a *Archive) parsePackageIndex(out chan *PackageInfo, file string) error {
 	return parsePackageIndexFile(out, textFile, suite, pocket, component, arch)
 }
 
-func (a *Archive) updatePackageInfo(packages chan *PackageInfo, done chan struct{}, stats chan int) {
+func (a *Archive) updatePackageInfo(packages chan *debianpkg.PackageInfo, done chan struct{}, stats chan int) {
 	insertedPkg := 0
-	if a.Packages == nil {
-		a.Packages = make(map[string]map[string]*PackageInfo)
-	}
 
 	for {
 		select {
 		case pkg := <-packages:
-			if _, ok := a.Packages[pkg.Name]; !ok {
-				a.Packages[pkg.Name] = make(map[string]*PackageInfo, 0)
-			}
+			err := a.Database.PrepareInsertPackage(pkg)
 
-			key := fmt.Sprintf("%v%v_%v_%v", pkg.Suite, pkg.Pocket, pkg.Component, pkg.Architecture)
 			insertedPkg++
-			a.Packages[pkg.Name][key] = pkg
+
+			if err != nil {
+				log.Errorf("failed to insert package %v in db: %v", pkg.Name, err)
+			}
+			if insertedPkg%10000 == 0 {
+				log.Debugf("Inserted %v packages", insertedPkg)
+				err := a.Database.InsertPrepared()
+				if err != nil {
+					log.Errorf("transaction failed: %v", err)
+				}
+			}
 		case <-done:
+			err := a.Database.InsertPrepared()
+			if err != nil {
+				log.Errorf("transaction failed: %v", err)
+			}
 			stats <- insertedPkg
 			return
 		}

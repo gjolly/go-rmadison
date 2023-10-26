@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gjolly/go-rmadison/pkg/debian"
+	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -64,7 +64,7 @@ func main() {
 
 	queryURL := fmt.Sprintf("%v/%v", baseURL, pkg)
 
-	var pkgInfo []debian.PackageInfo
+	var pkgInfo []debianpkg.PackageInfo
 	resp, err := client.R().
 		SetResult(&pkgInfo).
 		Get(queryURL)
@@ -93,6 +93,9 @@ func main() {
 	}
 
 	lines = groupByComponent(lines)
+	sort.Slice(lines, func(i, j int) bool {
+		return lines[i][2] < lines[j][2]
+	})
 
 	lineFormat := fmt.Sprintf(" %%-%vv | %%-%vv | %%-%vv | %%-%vv\n", widths[0], widths[1], widths[2], widths[3])
 	for _, line := range lines {

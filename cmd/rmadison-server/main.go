@@ -13,10 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gjolly/go-rmadison/pkg/debian"
+	"github.com/gjolly/go-rmadison/pkg/archive"
+	"github.com/gjolly/go-rmadison/pkg/database"
+	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 	"github.com/go-resty/resty/v2"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var log *zap.SugaredLogger
@@ -28,7 +33,7 @@ func init() {
 }
 
 type httpHandler struct {
-	Caches []*debian.Archive
+	Caches []*archive.Archive
 }
 
 func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -40,25 +45,18 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allInfo := make(map[string]*debian.PackageInfo, 0)
+	allInfo := make([]*debianpkg.PackageInfo, 0)
 	for _, cache := range h.Caches {
-		allInfoArchive, ok := cache.Packages[pkg]
-		if ok {
-			for k, v := range allInfoArchive {
-				allInfo[k] = v
-			}
+		allInfoArchive, err := cache.Database.GetPackage(pkg)
+		if err != nil {
+			log.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
+		allInfo = append(allInfo, allInfoArchive...)
 	}
 
-	// convert the dictionary to a list
-	fmtInfo := make([]*debian.PackageInfo, len(allInfo))
-	i := 0
-	for _, info := range allInfo {
-		fmtInfo[i] = info
-		i++
-	}
-
-	jsonInfo, err := json.Marshal(fmtInfo)
+	jsonInfo, err := json.Marshal(allInfo)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -68,9 +66,9 @@ func (h httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonInfo)
 }
 
-func refreshCaches(archives []*debian.Archive) {
+func refreshCaches(archives []*archive.Archive) {
 	for _, cache := range archives {
-		go func(cache *debian.Archive) {
+		go func(cache *archive.Archive) {
 			t := time.NewTicker(5 * time.Minute)
 			for {
 				now := time.Now()
@@ -107,12 +105,13 @@ func startPprofServer(addr string) {
 
 // Config is the configuration of the rmadison server
 type Config struct {
-	Caches []*debian.Archive
+	Caches []*archive.Archive
 }
 
 type archiveYAMLConf struct {
 	BaseURL  string   `yaml:"base_url"`
 	PortsURL string   `yaml:"ports_url"`
+	Database string   `yaml:"database"`
 	Pockets  []string `yaml:"pockets"`
 }
 
@@ -147,7 +146,7 @@ func parseConfig() (*Config, error) {
 	})
 	yaml.Unmarshal(configBytes, rawConfig)
 	conf := new(Config)
-	conf.Caches = make([]*debian.Archive, len(rawConfig.Archives))
+	conf.Caches = make([]*archive.Archive, len(rawConfig.Archives))
 
 	httpClient := resty.New()
 
@@ -170,16 +169,38 @@ func parseConfig() (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		conf.Caches[i] = &debian.Archive{
+		db, err := database.NewConn("sqlite3", archiveConf.Database)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to connect to database %v", archiveConf.Database)
+		}
+		conf.Caches[i] = &archive.Archive{
 			BaseURL:  baseURL,
 			PortsURL: portsURL,
 			Pockets:  archiveConf.Pockets,
 			CacheDir: rawConfig.CacheDirectory,
 			Client:   httpClient,
+			Database: db,
 		}
 	}
 
 	return conf, err
+}
+
+func startPprofServer(addr string) {
+	r := http.NewServeMux()
+
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	s := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
+	log.Infof("starting pprof server on %v\n", addr)
+	log.Fatal(s.ListenAndServe())
 }
 
 func main() {
@@ -200,19 +221,11 @@ func main() {
 		log.Fatal("No archive defined in config file")
 	}
 
-	log.Info("Reading local cache")
-	for _, cache := range conf.Caches {
-		_, packages, err := cache.RefreshCache(true)
-		if err != nil {
-			log.Error("error reading existing cache data:", err)
-		}
-		log.Infof("packages in cache: %v", packages)
-	}
-
 	refreshCaches(conf.Caches)
 	handler := httpHandler{
 		Caches: conf.Caches,
 	}
+
 	addr := ":8433"
 	s := &http.Server{
 		Addr:           addr,
