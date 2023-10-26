@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
@@ -136,7 +136,7 @@ func parseConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot find any config file in %v", configPaths)
 	}
 
-	configBytes, err := ioutil.ReadAll(configFile)
+	configBytes, err := io.ReadAll(configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -184,23 +184,6 @@ func parseConfig() (*Config, error) {
 	}
 
 	return conf, err
-}
-
-func startPprofServer(addr string) {
-	r := http.NewServeMux()
-
-	r.HandleFunc("/debug/pprof/", pprof.Index)
-	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
-
-	s := &http.Server{
-		Addr:    addr,
-		Handler: r,
-	}
-	log.Infof("starting pprof server on %v\n", addr)
-	log.Fatal(s.ListenAndServe())
 }
 
 func main() {

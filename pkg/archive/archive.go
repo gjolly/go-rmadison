@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
@@ -149,7 +148,7 @@ func parseIndexLine(line string) *ReleaseFileEntry {
 // ParseReleaseFile parses the content of a release file
 func ParseReleaseFile(file *os.File) (*ReleaseFile, error) {
 	file.Seek(0, 0)
-	raw, err := ioutil.ReadAll(file)
+	raw, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +355,7 @@ func (a *Archive) RefreshCache(local bool) (int, int, error) {
 }
 
 func (a *Archive) listFilesInCache(filter string) ([]string, error) {
-	files, err := ioutil.ReadDir(a.CacheDir)
+	files, err := os.ReadDir(a.CacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +384,7 @@ func uncompressFile(path string) (string, error) {
 	}
 	defer gzipReader.Close()
 
-	result, err := ioutil.ReadAll(gzipReader)
+	result, err := io.ReadAll(gzipReader)
 	if err != nil {
 		return "", err
 	}
