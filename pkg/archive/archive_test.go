@@ -99,3 +99,62 @@ func TestParsePackageIndexFile(t *testing.T) {
 		t.Errorf("expected %v packages, got %v", expectedPackages, len(packages))
 	}
 }
+
+func TestGetInfoFromIndexName(t *testing.T) {
+	type testData struct {
+		Input        string
+		Suite        string
+		Pocket       string
+		Component    string
+		Architecture string
+	}
+
+	testTable := []testData{
+		{
+			"ports.ubuntu.com_dists_mantic-updates_main_binary-armhf_Packages.gz",
+			"mantic",
+			"-updates",
+			"main",
+			"armhf",
+		},
+		{
+			"ports.ubuntu.com_dists_mantic_main_binary-s390x_Packages.gz",
+			"mantic",
+			"",
+			"main",
+			"s390x",
+		},
+		{
+			"archive.ubuntu.com_ubuntu_dists_xenial_main_binary-amd64_Packages.gz",
+			"xenial",
+			"",
+			"main",
+			"amd64",
+		},
+	}
+
+	for _, testCase := range testTable {
+		t.Run(testCase.Input, func(t *testing.T) {
+			s, p, c, a, err := getInfoFromIndexName(testCase.Input)
+			if err != nil {
+				t.Error("unexpected error", err)
+			}
+
+			if s != testCase.Suite {
+				t.Errorf("expected %v, got %v", testCase.Suite, s)
+			}
+
+			if p != testCase.Pocket {
+				t.Errorf("expected %v, got %v", testCase.Pocket, p)
+			}
+
+			if c != testCase.Component {
+				t.Errorf("expected %v, got %v", testCase.Component, c)
+			}
+
+			if a != testCase.Architecture {
+				t.Errorf("expected %v, got %v", testCase.Architecture, a)
+			}
+		})
+	}
+}

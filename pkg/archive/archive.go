@@ -373,6 +373,7 @@ func uncompressFile(path string) (string, error) {
 	return string(result), nil
 }
 
+// parsePackageIndexFile extracts the package information from an index of packages
 func parsePackageIndexFile(out chan *debianpkg.PackageInfo, rawBody, suite, pocket, component, arch string) error {
 	packageInfo := strings.Split(rawBody, "\n\n")
 
@@ -425,6 +426,8 @@ func parsePackageIndexFile(out chan *debianpkg.PackageInfo, rawBody, suite, pock
 	return nil
 }
 
+// getInfoFromIndexName parses the name of a local index file and returns
+// suite, pocket, component and architecture.
 func getInfoFromIndexName(name string) (string, string, string, string, error) {
 	meaningfulName := strings.Split(name, "dists_")
 	if len(meaningfulName) != 2 {
