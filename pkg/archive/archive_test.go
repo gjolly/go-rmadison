@@ -1,8 +1,11 @@
 package archive
 
 import (
+	"io"
 	"os"
 	"testing"
+
+	"github.com/gjolly/go-rmadison/pkg/debianpkg"
 )
 
 func TestParseReleaseFile(t *testing.T) {
@@ -54,5 +57,45 @@ func TestParseReleaseFile(t *testing.T) {
 
 	if packageFile.Size != 40 {
 		t.Error("wrong size for index file")
+	}
+}
+
+func TestParsePackageIndexFile(t *testing.T) {
+	file, err := os.Open("./testdata/jammy-packages.txt")
+	if err != nil {
+		t.Fatal("failed to open test file", err)
+	}
+
+	fileContent, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal("failed to read test file", err)
+	}
+
+	var (
+		pkgInfo  = make(chan *debianpkg.PackageInfo)
+		done     = make(chan struct{})
+		packages = make([]*debianpkg.PackageInfo, 0)
+	)
+
+	go func() {
+		for {
+			select {
+			case info := <-pkgInfo:
+				packages = append(packages, info)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	err = parsePackageIndexFile(pkgInfo, string(fileContent), "jammy", "", "main", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done <- struct{}{}
+
+	expectedPackages := 6090
+	if len(packages) != expectedPackages {
+		t.Errorf("expected %v packages, got %v", expectedPackages, len(packages))
 	}
 }
